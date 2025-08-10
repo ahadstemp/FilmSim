@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Halation Studio — Node-based Halation + Glow</title>
+<style>
+  :root{
+    --bg:#0f1113; --panel:#16181a; --accent:#00BFA6; --muted:#9aa0a6;
+    --gap:12px; --radius:10px; --card:#111318;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:#e6eef1;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+  .app{display:flex;flex-direction:column;height:100vh;gap:var(--gap);padding:12px;}
+  header{display:flex;align-items:center;gap:12px;}
+  h1{font-size:16px;margin:0;font-weight:600;}
+  .main{display:flex;flex:1;gap:12px;align-items:stretch;}
+  /* canvas area */
+  .canvas-wrap{flex:1;display:flex;flex-direction:column;background:linear-gradient(180deg,#0b0c0d,#0f1113);border-radius:12px;padding:8px;min-height:220px}
+  #glcanvas{width:100%;height:100%;border-radius:8px;background:#000;touch-action:none;display:block;}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:8px;}
+  .control-panel{width:360px;max-width:42vw;background:var(--panel);border-radius:12px;padding:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6);overflow:auto}
+  .node-card{background:var(--card);border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid rgba(255,255,255,0.03)}
+  .node-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .node-title{font-weight:600}
+  .node-controls{margin-top:8px}
+  .control-row{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+  label{font-size:13px;color:var(--muted)}
+  input[type="range"]{width:100%}
+  .big-btn{background:var(--accent);color:#012;border:none;padding:10px 12px;border-radius:10px;font-weight:600}
+  .small-btn{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:8px;border-radius:8px}
+  .muted{color:var(--muted);font-size:13px}
+  .row{display:flex;gap:8px;align-items:center}
+  .tiny{font-size:12px;color:var(--muted)}
+  select,input[type="color"]{width:100%;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit}
+  .toggle{display:inline-flex;align-items:center;gap:8px}
+  .icon-btn{background:transparent;border:0;color:var(--muted);padding:6px;border-radius:6px}
+  footer{display:flex;gap:12px;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+  /* mobile-first */
+  @media(min-width:900px){
+    .app{padding:18px}
+    .control-panel{max-width:420px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Halation Studio — Node Editor</h1>
+    <div class="muted">Halation + Glow — node-based. Reorder nodes; per-node bypass.</div>
+  </header>
+
+  <div class="main">
+    <div class="canvas-wrap">
+      <canvas id="glcanvas"></canvas>
+      <div class="toolbar">
+        <input id="file" type="file" accept="image/*" />
+        <button id="fitBtn" class="small-btn">Fit</button>
+        <button id="download" class="big-btn">Download (crop)</button>
+      </div>
+    </div>
+
+    <aside class="control-panel" id="controls">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <div style="flex:1">
+          <div class="muted">Node Order (top = first applied)</div>
+        </div>
+      </div>
+
+      <!-- Node list & controls -->
+      <div id="nodesContainer"></div>
+
+      <div style="margin-top:8px" class="muted tiny">Tip: drag is not implemented; use ↑/↓ to reorder. The node rendered last takes priority.</div>
+    </aside>
+  </div>
+
+  <footer>
+    <div class="muted">Built for quick halation + glow experimentation.</div>
+    <div class="muted">Open-source demo</div>
+  </footer>
+</div>
+
+<script>
+/* Full Node-based Halation + Glow WebGL2 app
+   - Two nodes: Halation, Glow
+   - Node ordering with ↑ ↓ buttons (last node applied last)
+   - Per-node enable & before/after (bypass)
+   - Glow: many blend modes, Resolve-accurate options available through Resolve Mode toggle
+   - Halation preserved from prior working version (aspect-correct)
+   Notes: optimized for clarity and to run in modern browsers with WebGL2.
+*/
+
+// --------- DOM refs ----------
+const $ = id => document.getElementById(id);
+const fileInput = $('file');
+const fitBtn = $('fitBtn');
+const downloadBtn = $('download');
+const nodesContainer = $('nodesContainer');
+const canvas = $('glcanvas');
+
+// --------- GL init ----------
+let gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+if(!gl){ alert('WebGL2 required. Use a modern browser.'); throw new Error('WebGL2 required'); }
+
+// --------- state ----------
+let sourceTex = null;
+let imageRect = null; // crop region in canvas pixels
+let workingW = 1024, workingH = 768;
+
+// We'll keep a simple shared FBO pool sized to canvas pixels
+let texPool = {}; // will hold dynamically created textures/fbos per pass
+
+// Node structure: each node has id, type, enabled, before (bypass), collapsed, settings
+let nodes = [
+  { id: 'halation', type: 'Halation', enabled: true, before: false, collapsed: false, settings: {
+      amount: 0.6, radius: 40, threshold: 0.85, color: '#ff8b6b', iterations: 2
+    }
+  },
+  { id: 'glow', type: 'Glow', enabled: true, before: false, collapsed: true, settings: {
+      amount: 0.0, radius: 40, threshold: 0.9, color: '#ffd4b2', iterations: 2,
+      blend: 'Screen', resolveMode: false
+    }
+  }
+];
+
+// ------- helpers: canvas sizing -------
+function fitCanvas(){
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = Math.max(400, Math.floor(rect.width - 16));
+  const cssH = Math.max(300, Math.floor(window.innerHeight - 200));
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+}
+fitCanvas();
+window.addEventListener('resize', ()=>{ fitCanvas(); initPool(); render(); });
+
+// ------- GL shader helpers -------
+function compileShader(src, type){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(s));
+    throw new Error('Shader compile error');
+  }
+  return s;
+}
+function linkProgram(vsSrc, fsSrc){
+  const vs = compileShader(vsSrc, gl.VERTEX_SHADER);
+  const fs = compileShader(fsSrc, gl.FRAGMENT_SHADER);
+  const p = gl.createProgram();
+  gl.attachShader(p, vs);
+  gl.attachShader(p, fs);
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){
+    console.error(gl.getProgramInfoLog(p));
+    throw new Error('Program link error');
+  }
+  return p;
+}
+
+// basic fullscreen quad
+const VS_QUAD = `#version 300 es
+in vec2 a_pos; in vec2 a_uv; out vec2 v_uv;
+void main(){ v_uv = a_uv; gl_Position = vec4(a_pos,0.0,1.0); }`;
+
+const QUAD_BUF = new Float32Array([
+  -1,-1, 0,0,
+   1,-1, 1,0,
+  -1, 1, 0,1,
+   1, 1, 1,1,
+]);
+
+let quadVAO = null;
+function setupQuad(){
+  quadVAO = gl.createVertexArray();
+  gl.bindVertexArray(quadVAO);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, QUAD_BUF, gl.STATIC_DRAW);
+  // attributes will be enabled in bindAttributes
+}
+setupQuad();
+
+function bindAttributes(prog){
+  gl.bindVertexArray(quadVAO);
+  // ensure buffer bound (it is bound in setupQuad but rebind to be safe)
+  const pos = gl.getAttribLocation(prog, 'a_pos');
+  const uv = gl.getAttribLocation(prog, 'a_uv');
+  gl.enableVertexAttribArray(pos);
+  gl.enableVertexAttribArray(uv);
+  gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
+}
+
+// ------- shader sources (reused / composed) -------
+// Mask shader (luminance threshold)
+const FS_MASK = `#version 300 es
+precision highp float;
+in vec2 v_uv; out vec4 o;
+uniform sampler2D u_tex; uniform float u_threshold;
+void main(){
+  vec3 c = texture(u_tex, v_uv).rgb;
+  float l = dot(c, vec3(0.299,0.587,0.114));
+  float mask = smoothstep(u_threshold, 1.0, l);
+  o = vec4(mask,mask,mask,1.0);
+}`;
+
+// Separable blur shader (9-tap Gaussian)
+const FS_BLUR = `#version 300 es
+precision highp float;
+in vec2 v_uv; out vec4 o;
+uniform sampler2D u_tex; uniform vec2 u_texel; uniform float u_radius; uniform int u_horizontal;
+float gaussian(float x, float sigma){ return exp(- (x*x) / (2.0 * sigma * sigma)); }
+void main(){
+  float sigma = max(1.0, u_radius / 3.0);
+  vec3 sum = vec3(0.0); float wsum = 0.0;
+  for(int i=-4;i<=4;i++){
+    float t = float(i);
+    float w = gaussian(t, sigma);
+    vec2 off = u_horizontal==1 ? vec2(t * u_texel.x, 0.0) : vec2(0.0, t * u_texel.y);
+    sum += texture(u_tex, v_uv + off).rgb * w; wsum += w;
+  }
+  o = vec4(sum/wsum, 1.0);
+}`;
+
+// Tint the mask into colored glow/halo
+const FS_TINT = `#version 300 es
+precision highp float;
+in vec2 v_uv; out vec4 o;
+uniform sampler2D u_mask; uniform vec3 u_tint;
+void main(){
+  float m = texture(u_mask, v_uv).r;
+  float s = pow(m, 0.9);
+  o = vec4(u_tint * s, 1.0);
+}`;
+
+// Draw/composite shader: this will support multiple blend modes between base and effect texture.
+// We'll implement several blend functions, with fast approximations as default and Resolve-accurate formulas available in branches.
+const FS_COMPOSITE = `#version 300 es
+precision highp float;
+in vec2 v_uv; out vec4 o;
+uniform sampler2D u_base; // input image (or previous node output)
+uniform sampler2D u_effect; // effect result to blend
+uniform float u_amount;
+uniform int u_mode; // enum for blend mode
+// modes: 0=Normal,1=Screen,2=Add,3=OverlayFast,4=SoftLightFast,5=Multiply,6=OverlayResolve,7=SoftLightResolve
+
+vec3 blendScreen(vec3 a, vec3 b){ return 1.0 - (1.0 - a) * (1.0 - b); }
+vec3 blendAdd(vec3 a, vec3 b){ return a + b; }
+vec3 blendMultiply(vec3 a, vec3 b){ return a * b; }
+vec3 overlayFast(vec3 a, vec3 b){ return mix(2.0*a*b, 1.0 - 2.0*(1.0-a)*(1.0-b), step(0.5,a)); }
+vec3 softlightFast(vec3 a, vec3 b){
+  // simple approximation
+  return mix(a - (1.0 - 2.0*b) * a * (1.0 - a), a + (2.0*b - 1.0) * (sqrt(a) - a), step(0.5,b));
+}
+
+// Resolve-accurate overlay and softlight approximations based on common filmic implementations
+vec3 overlayResolve(vec3 a, vec3 b){
+  vec3 res;
+  for(int i=0;i<3;i++){
+    if(a[i] < 0.5) res[i] = 2.0*a[i]*b[i];
+    else res[i] = 1.0 - 2.0*(1.0-a[i])*(1.0-b[i]);
+  }
+  return res;
+}
+vec3 softlightResolve(vec3 a, vec3 b){
+  // Based on Adobe/Resolve implementation (not exact source but close behavior)
+  vec3 res;
+  for(int i=0;i<3;i++){
+    if(b[i] < 0.5){
+      res[i] = a[i] - (1.0 - 2.0*b[i]) * a[i] * (1.0 - a[i]);
+    } else {
+      float d;
+      if(a[i] < 0.25) d = ((16.0 * a[i] - 12.0) * a[i] + 4.0) * a[i];
+      else d = sqrt(a[i]);
+      res[i] = a[i] + (2.0*b[i] - 1.0) * (d - a[i]);
+    }
+  }
+  return res;
+}
+
+void main(){
+  vec3 base = texture(u_base, v_uv).rgb;
+  vec3 eff = texture(u_effect, v_uv).rgb;
+  vec3 blended;
+  if(u_mode==0){ blended = eff; } // Normal: effect replaces (but we'll mix by amount)
+  else if(u_mode==1){ blended = blendScreen(base, eff); }
+  else if(u_mode==2){ blended = blendAdd(base, eff); }
+  else if(u_mode==3){ blended = overlayFast(base, eff); }
+  else if(u_mode==4){ blended = softlightFast(base, eff); }
+  else if(u_mode==5){ blended = blendMultiply(base, eff); }
+  else if(u_mode==6){ blended = overlayResolve(base, eff); }
+  else if(u_mode==7){ blended = softlightResolve(base, eff); }
+  else { blended = eff; }
+  // final mix: lerp(base, blended, amount) but preserving original brightness when amount small
+  vec3 outc = mix(base, blended, clamp(u_amount, 0.0, 1.0));
+  // If amount>1.0, do additive boost scaling
+  if(u_amount > 1.0){
+    outc = base + (blended - base) * (u_amount);
+  }
+  o = vec4(outc, 1.0);
+}`;
+
+// compile commonly used programs
+const progMask = linkProgram(VS_QUAD, FS_MASK);
+const progBlur = linkProgram(VS_QUAD, FS_BLUR);
+const progTint = linkProgram(VS_QUAD, FS_TINT);
+const progComposite = linkProgram(VS_QUAD, FS_COMPOSITE);
+
+// ------- FBO / texture pool -------
+function createTex(w, h){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function createFBO(t){
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  const s = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if(s !== gl.FRAMEBUFFER_COMPLETE) console.warn('FBO incomplete', s);
+  return f;
+}
+
+function initPool(){
+  // clean previous
+  for(let k in texPool){
+    try{ if(texPool[k].tex) gl.deleteTexture(texPool[k].tex); if(texPool[k].fbo) gl.deleteFramebuffer(texPool[k].fbo); }catch(e){}
+  }
+  texPool = {};
+  const w = canvas.width, h = canvas.height;
+  // base textures: mask, tmp, blur, tinted, nodeOut1, nodeOut2
+  texPool.mask = { tex: createTex(w,h), fbo: createFBO(null) }; // we'll set fbo later
+  texPool.tmp  = { tex: createTex(w,h), fbo: createFBO(null) };
+  texPool.blur = { tex: createTex(w,h), fbo: createFBO(null) };
+  texPool.tinted = { tex: createTex(w,h), fbo: createFBO(null) };
+  texPool.nodeOutA = { tex: createTex(w,h), fbo: createFBO(null) };
+  texPool.nodeOutB = { tex: createTex(w,h), fbo: createFBO(null) };
+  // attach fbos properly
+  texPool.mask.fbo = createFBO(texPool.mask.tex);
+  texPool.tmp.fbo  = createFBO(texPool.tmp.tex);
+  texPool.blur.fbo = createFBO(texPool.blur.tex);
+  texPool.tinted.fbo = createFBO(texPool.tinted.tex);
+  texPool.nodeOutA.fbo = createFBO(texPool.nodeOutA.tex);
+  texPool.nodeOutB.fbo = createFBO(texPool.nodeOutB.tex);
+}
+initPool();
+
+// ------- Bind attributes utility -------
+function bindAttribs(prog){
+  gl.bindVertexArray(quadVAO);
+  const posLoc = gl.getAttribLocation(prog, 'a_pos');
+  const uvLoc = gl.getAttribLocation(prog, 'a_uv');
+  gl.enableVertexAttribArray(posLoc); gl.enableVertexAttribArray(uvLoc);
+  // Bind the same quad buffer (it is already bound); set pointers
+  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 16, 8);
+}
+
+// ------- Render utilities: mask -> blur -> tint pipeline -------
+function maskPass(inputTex, threshold, outFBO){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, outFBO);
+  gl.viewport(0,0,canvas.width,canvas.height);
+  gl.useProgram(progMask);
+  bindAttribs(progMask);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+  gl.uniform1i(gl.getUniformLocation(progMask, 'u_tex'), 0);
+  gl.uniform1f(gl.getUniformLocation(progMask, 'u_threshold'), threshold);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+function blurSeparable(inputTex, radius, iterations){
+  // ping-pong with texPool.tmp and texPool.blur. Return texPool.blur.tex as final blurred
+  let rad = radius;
+  for(let i=0;i<iterations;i++){
+    // horizontal
+    gl.bindFramebuffer(gl.FRAMEBUFFER, texPool.tmp.fbo);
+    gl.viewport(0,0,canvas.width,canvas.height);
+    gl.useProgram(progBlur);
+    bindAttribs(progBlur);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, (i===0)? texPool.mask.tex : texPool.blur.tex);
+    gl.uniform1i(gl.getUniformLocation(progBlur,'u_tex'), 0);
+    gl.uniform2f(gl.getUniformLocation(progBlur,'u_texel'), 1.0/canvas.width, 1.0/canvas.height);
+    gl.uniform1f(gl.getUniformLocation(progBlur,'u_radius'), rad);
+    gl.uniform1i(gl.getUniformLocation(progBlur,'u_horizontal'), 1);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    // vertical
+    gl.bindFramebuffer(gl.FRAMEBUFFER, texPool.blur.fbo);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texPool.tmp.tex);
+    gl.uniform1i(gl.getUniformLocation(progBlur,'u_tex'), 0);
+    gl.uniform1i(gl.getUniformLocation(progBlur,'u_horizontal'), 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    rad *= 0.6;
+    // copy result into mask for next iter if multiple (not necessary; just ping/pong already)
+  }
+  return texPool.blur.tex;
+}
+function tintPass(maskTex, tintColor, outFBO){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, outFBO);
+  gl.viewport(0,0,canvas.width,canvas.height);
+  gl.useProgram(progTint);
+  bindAttribs(progTint);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+  gl.uniform1i(gl.getUniformLocation(progTint,'u_mask'), 0);
+  gl.uniform3f(gl.getUniformLocation(progTint,'u_tint'), tintColor[0], tintColor[1], tintColor[2]);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// composite pass using progComposite
+function compositePass(baseTex, effectTex, amount, mode, outFBO){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, outFBO);
+  gl.viewport(0,0,canvas.width,canvas.height);
+  gl.useProgram(progComposite);
+  bindAttribs(progComposite);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, baseTex);
+  gl.uniform1i(gl.getUniformLocation(progComposite,'u_base'), 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, effectTex);
+  gl.uniform1i(gl.getUniformLocation(progComposite,'u_effect'), 1);
+  gl.uniform1f(gl.getUniformLocation(progComposite,'u_amount'), amount);
+  gl.uniform1i(gl.getUniformLocation(progComposite,'u_mode'), mode);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ------- Node renderers -------
+// Each node takes an input texture and returns an output texture (texture object).
+// We'll alternate outputs into nodeOutA / nodeOutB textures to chain.
+
+function renderHalationNode(inputTex, settings){
+  // 1) mask from inputTex -> texPool.mask
+  maskPass(inputTex, parseFloat(settings.threshold), texPool.mask.fbo);
+  // 2) blur mask -> texPool.blur (multi-iter)
+  const blurred = blurSeparable(texPool.mask.tex, parseFloat(settings.radius), parseInt(settings.iterations));
+  // 3) tint -> texPool.tinted
+  const hex = settings.color.replace('#','');
+  const r = parseInt(hex.substring(0,2),16)/255;
+  const g = parseInt(hex.substring(2,4),16)/255;
+  const b = parseInt(hex.substring(4,6),16)/255;
+  tintPass(blurred, [r,g,b], texPool.tinted.fbo);
+  // 4) composite: base=inputTex, effect=texPool.tinted -> out to nodeOutA
+  compositePass(inputTex, texPool.tinted.tex, parseFloat(settings.amount), 2, texPool.nodeOutA.fbo); // use Add(2) for halation default additive look
+  return texPool.nodeOutA.tex;
+}
+
+function renderGlowNode(inputTex, settings){
+  // 1) mask threshold from inputTex -> texPool.mask
+  maskPass(inputTex, parseFloat(settings.threshold), texPool.mask.fbo);
+  // 2) blur mask into texPool.blur
+  const blurred = blurSeparable(texPool.mask.tex, parseFloat(settings.radius), parseInt(settings.iterations));
+  // 3) tint blurred mask into texPool.tinted
+  const hex = settings.color.replace('#','');
+  const r = parseInt(hex.substring(0,2),16)/255;
+  const g = parseInt(hex.substring(2,4),16)/255;
+  const b = parseInt(hex.substring(4,6),16)/255;
+  tintPass(blurred, [r,g,b], texPool.tinted.fbo);
+  // 4) decide blend mode mapping (strings to u_mode ints)
+  const modeMapFast = {
+    'Normal':0, 'Screen':1,'Add':2,'Overlay (Fast)':3,'SoftLight (Fast)':4,'Multiply':5
+  };
+  const modeMapResolve = {
+    'Overlay (Resolve)':6,'SoftLight (Resolve)':7
+  };
+  let mode = 0;
+  if(settings.resolveMode && (settings.blend in modeMapResolve)) mode = modeMapResolve[settings.blend];
+  else if(settings.blend in modeMapFast) mode = modeMapFast[settings.blend];
+  else {
+    // fallback mapping: try general names
+    mode = modeMapFast[settings.blend] || 1;
+  }
+  // composite: base=inputTex, effect=texPool.tinted -> out to nodeOutB
+  compositePass(inputTex, texPool.tinted.tex, parseFloat(settings.amount), mode, texPool.nodeOutB.fbo);
+  return texPool.nodeOutB.tex;
+}
+
+// ------- Main pipeline runner -------
+function runPipelineAndDraw(){
+  if(!sourceTex){
+    // clear
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0,0,canvas.width,canvas.height);
+    gl.clearColor(0,0,0,1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    return;
+  }
+  // Start with sourceTex as current
+  let currentTex = sourceTex;
+  // We'll iterate nodes in order, applying enabled nodes. Each node writes to its assigned nodeOut (A or B)
+  for(let i=0;i<nodes.length;i++){
+    const node = nodes[i];
+    if(!node.enabled){
+      // bypass: pass-through to next node (we can copy by rendering inputTex into nodeOut)
+      compositePass(currentTex, currentTex, 0.0, 0, (i%2===0)? texPool.nodeOutA.fbo : texPool.nodeOutB.fbo);
+      currentTex = (i%2===0)? texPool.nodeOutA.tex : texPool.nodeOutB.tex;
+      continue;
+    }
+    if(node.before){ // per-node before/after: show before (bypass the effect)
+      compositePass(currentTex, currentTex, 0.0, 0, (i%2===0)? texPool.nodeOutA.fbo : texPool.nodeOutB.fbo);
+      currentTex = (i%2===0)? texPool.nodeOutA.tex : texPool.nodeOutB.tex;
+      continue;
+    }
+    // active node: render according to type
+    if(node.type === 'Halation'){
+      currentTex = renderHalationNode(currentTex, node.settings);
+    } else if(node.type === 'Glow'){
+      currentTex = renderGlowNode(currentTex, node.settings);
+    } else {
+      // unknown node -> pass through
+      compositePass(currentTex, currentTex, 0.0, 0, (i%2===0)? texPool.nodeOutA.fbo : texPool.nodeOutB.fbo);
+      currentTex = (i%2===0)? texPool.nodeOutA.tex : texPool.nodeOutB.tex;
+    }
+  }
+  // final blit to screen (currentTex is final)
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0,0,canvas.width,canvas.height);
+  // simple copy shader: use composite prog with u_amount=0 to just show base (compositePass could be used but we'll draw directly)
+  gl.useProgram(progComposite);
+  bindAttribs(progComposite);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, currentTex);
+  gl.uniform1i(gl.getUniformLocation(progComposite,'u_base'), 0);
+  // effect = black, amount=0 -> composite will output base
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texPool.tmp.tex); // tmp is unused here
+  gl.uniform1i(gl.getUniformLocation(progComposite,'u_effect'), 1);
+  gl.uniform1f(gl.getUniformLocation(progComposite,'u_amount'), 0.0);
+  gl.uniform1i(gl.getUniformLocation(progComposite,'u_mode'), 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ------- UI building & bindings -------
+function createNodeCard(node, idx){
+  const card = document.createElement('div');
+  card.className = 'node-card';
+  // header
+  const header = document.createElement('div'); header.className='node-header';
+  const title = document.createElement('div'); title.className='node-title'; title.textContent = node.type;
+  const headerRight = document.createElement('div'); headerRight.style.display='flex'; headerRight.style.gap='6px';
+  // up/down buttons
+  const up = document.createElement('button'); up.className='icon-btn'; up.innerHTML='↑'; up.title='Move up';
+  const down = document.createElement('button'); down.className='icon-btn'; down.innerHTML='↓'; down.title='Move down';
+  const toggleEnable = document.createElement('button'); toggleEnable.className='small-btn'; toggleEnable.textContent = node.enabled ? 'Enabled' : 'Disabled';
+  const collapseBtn = document.createElement('button'); collapseBtn.className='small-btn'; collapseBtn.textContent = node.collapsed ? 'Expand' : 'Collapse';
+  headerRight.appendChild(up); headerRight.appendChild(down); headerRight.appendChild(toggleEnable); headerRight.appendChild(collapseBtn);
+  header.appendChild(title); header.appendChild(headerRight);
+  card.appendChild(header);
+
+  // order handlers
+  up.addEventListener('click', ()=>{
+    if(idx===0) return;
+    const tmp = nodes[idx-1]; nodes[idx-1] = nodes[idx]; nodes[idx] = tmp;
+    rebuildUI(); render();
+  });
+  down.addEventListener('click', ()=>{
+    if(idx===nodes.length-1) return;
+    const tmp = nodes[idx+1]; nodes[idx+1] = nodes[idx]; nodes[idx] = tmp;
+    rebuildUI(); render();
+  });
+
+  toggleEnable.addEventListener('click', ()=>{
+    node.enabled = !node.enabled;
+    toggleEnable.textContent = node.enabled ? 'Enabled' : 'Disabled';
+    render();
+  });
+
+  collapseBtn.addEventListener('click', ()=>{
+    node.collapsed = !node.collapsed;
+    collapseBtn.textContent = node.collapsed ? 'Expand' : 'Collapse';
+    rebuildUI(); // easier to rebuild
+  });
+
+  // Node controls
+  if(!node.collapsed){
+    const controls = document.createElement('div'); controls.className='node-controls';
+    // per-node before (bypass)
+    const beforeRow = document.createElement('div'); beforeRow.className='control-row';
+    const beforeLabel = document.createElement('label'); beforeLabel.textContent = 'Before / After (bypass this node)';
+    const beforeBtn = document.createElement('button'); beforeBtn.className='small-btn'; beforeBtn.textContent = node.before ? 'Showing Before' : 'Showing After';
+    beforeBtn.addEventListener('click', ()=>{ node.before = !node.before; beforeBtn.textContent = node.before ? 'Showing Before' : 'Showing After'; render(); });
+    beforeRow.appendChild(beforeLabel); beforeRow.appendChild(beforeBtn);
+    controls.appendChild(beforeRow);
+
+    // Then node-specific settings
+    if(node.type === 'Halation'){
+      // Amount, Radius, Threshold, Color, Iterations
+      controls.appendChild(makeRangeControl('Amount', node.settings, 'amount', 0, 2, 0.01));
+      controls.appendChild(makeRangeControl('Radius (px)', node.settings, 'radius', 0, 200, 1));
+      controls.appendChild(makeRangeControl('Threshold', node.settings, 'threshold', 0.5, 0.99, 0.01));
+      controls.appendChild(makeColorControl('Color', node.settings, 'color'));
+      controls.appendChild(makeRangeControl('Iterations', node.settings, 'iterations', 1, 4, 1));
+    } else if(node.type === 'Glow'){
+      // Amount, Radius, Threshold, Color, Iterations, Blend Mode, Resolve mode
+      controls.appendChild(makeRangeControl('Amount', node.settings, 'amount', 0, 2, 0.01, true)); // show value
+      controls.appendChild(makeRangeControl('Radius (px)', node.settings, 'radius', 0, 200, 1));
+      controls.appendChild(makeRangeControl('Threshold', node.settings, 'threshold', 0.5, 0.99, 0.01));
+      controls.appendChild(makeColorControl('Tint', node.settings, 'color'));
+      controls.appendChild(makeRangeControl('Iterations', node.settings, 'iterations', 1, 4, 1));
+      // blend mode select
+      const blendRow = document.createElement('div'); blendRow.className='control-row';
+      const blendLabel = document.createElement('label'); blendLabel.textContent = 'Blend Mode';
+      const blendSelect = document.createElement('select');
+      const blendOptions = ['Normal','Screen','Add','Overlay (Fast)','SoftLight (Fast)','Multiply','Overlay (Resolve)','SoftLight (Resolve)'];
+      blendOptions.forEach(op=>{ const o=document.createElement('option'); o.value=o.textContent=op; blendSelect.appendChild(o); });
+      blendSelect.value = node.settings.blend || 'Screen';
+      blendSelect.addEventListener('change', ()=>{ node.settings.blend = blendSelect.value; render(); });
+      blendRow.appendChild(blendLabel); blendRow.appendChild(blendSelect);
+      controls.appendChild(blendRow);
+
+      // Resolve Mode toggle
+      const resolveRow = document.createElement('div'); resolveRow.className='control-row';
+      const resolveLabel = document.createElement('label'); resolveLabel.textContent = 'Resolve Mode (enable to access Resolve-accurate Overlay/SoftLight)';
+      const resolveBtn = document.createElement('button'); resolveBtn.className='small-btn'; resolveBtn.textContent = node.settings.resolveMode ? 'Resolve ON' : 'Resolve OFF';
+      resolveBtn.addEventListener('click', ()=>{ node.settings.resolveMode = !node.settings.resolveMode; resolveBtn.textContent = node.settings.resolveMode ? 'Resolve ON' : 'Resolve OFF'; render(); });
+      resolveRow.appendChild(resolveLabel); resolveRow.appendChild(resolveBtn);
+      controls.appendChild(resolveRow);
+    }
+    card.appendChild(controls);
+  }
+
+  return card;
+}
+
+// helper creators
+function makeRangeControl(labelText, settingsObj, key, min, max, step, showValue){
+  const row = document.createElement('div'); row.className='control-row';
+  const label = document.createElement('label'); label.textContent = labelText + (showValue ? ` ` : '');
+  const range = document.createElement('input'); range.type='range'; range.min=min; range.max=max; range.step=step;
+  range.value = settingsObj[key];
+  const val = document.createElement('div'); val.className='tiny muted'; val.textContent = String(settingsObj[key]);
+  range.addEventListener('input', ()=>{ settingsObj[key] = range.value; val.textContent = String(range.value); render(); });
+  row.appendChild(label); row.appendChild(range); if(showValue) row.appendChild(val);
+  return row;
+}
+function makeColorControl(labelText, settingsObj, key){
+  const row = document.createElement('div'); row.className='control-row';
+  const label = document.createElement('label'); label.textContent = labelText;
+  const inp = document.createElement('input'); inp.type='color'; inp.value = settingsObj[key];
+  inp.addEventListener('input', ()=>{ settingsObj[key] = inp.value; render(); });
+  row.appendChild(label); row.appendChild(inp);
+  return row;
+}
+
+function rebuildUI(){
+  nodesContainer.innerHTML = '';
+  for(let i=0;i<nodes.length;i++){
+    const card = createNodeCard(nodes[i], i);
+    nodesContainer.appendChild(card);
+  }
+}
+
+// initial UI build
+rebuildUI();
+
+// ------- Image upload & texture creation -------
+function uploadImageToGL(img){
+  // resample and preserve aspect to canvas internal pixel size
+  fitCanvas();
+  const w = canvas.width, h = canvas.height;
+  const off = document.createElement('canvas'); off.width = w; off.height = h;
+  const ctx = off.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
+  const ia = img.width / img.height, ca = w / h;
+  let dw, dh, dx, dy;
+  if(ia > ca){ dw = w; dh = Math.round(w / ia); dx = 0; dy = Math.round((h - dh)/2); }
+  else { dh = h; dw = Math.round(h * ia); dy = 0; dx = Math.round((w - dw)/2); }
+  ctx.drawImage(img, dx, dy, dw, dh);
+  imageRect = { dx: dx, dy: dy, dw: dw, dh: dh, canvasW: w, canvasH: h };
+  // upload to GL texture
+  if(sourceTex) try{ gl.deleteTexture(sourceTex); } catch(e){}
+  sourceTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, sourceTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, off);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  initPool(); // recreate FBO pool sized to canvas dims
+  render();
+}
+
+// ------- render loop -------
+function render(){
+  // ensure pool exists and matches canvas
+  if(!texPool.nodeOutA) initPool();
+  runPipelineAndDraw();
+}
+
+// ------- file handlers & UI ----------
+fileInput.addEventListener('change', (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const img = new Image();
+  img.onload = ()=>{ uploadImageToGL(img); };
+  img.src = URL.createObjectURL(f);
+});
+fitBtn.addEventListener('click', ()=>{ render(); });
+
+// Download crop to imageRect
+downloadBtn.addEventListener('click', ()=>{
+  render();
+  if(imageRect && imageRect.dw>0 && imageRect.dh>0){
+    const tmp = document.createElement('canvas'); tmp.width = imageRect.dw; tmp.height = imageRect.dh;
+    const tctx = tmp.getContext('2d');
+    // draw from WebGL canvas (which is in device pixels)
+    tctx.drawImage(canvas, imageRect.dx, imageRect.dy, imageRect.dw, imageRect.dh, 0, 0, tmp.width, tmp.height);
+    tmp.toBlob(blob=>{
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='halation-node.png'; a.click(); URL.revokeObjectURL(url);
+    }, 'image/png');
+  } else {
+    const url = canvas.toDataURL(); const a=document.createElement('a'); a.href=url; a.download='halation-node.png'; a.click();
+  }
+});
+
+// initial blank render
+render();
+
+</script>
+</body>
+</html>
