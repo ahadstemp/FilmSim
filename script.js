@@ -3,7 +3,6 @@
 
 import { HalationNode } from './nodes/halation.js';
 import { GlowNode } from './nodes/glow.js';
-import { GrainNode } from './nodes/grain.js';
 
 const $ = id => document.getElementById(id);
 const fileInput = $('file');
@@ -19,14 +18,12 @@ if(!gl){ alert('WebGL2 required. Use a modern browser.'); throw new Error('WebGL
 const NodeRegistry = {
   halation: HalationNode,
   glow: GlowNode,
-  grain: GrainNode
 };
 
-// Active nodes (pipeline order). Grain added at the end by default.
+// Active nodes (pipeline order).
 let nodes = [
   { type: 'halation', settings: { ...HalationNode.defaults } },
   { type: 'glow', settings: { ...GlowNode.defaults } },
-  { type: 'grain', settings: { ...GrainNode.defaults } }
 ];
 
 // Shared state
