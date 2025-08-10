@@ -3,6 +3,7 @@
 
 import { HalationNode } from './nodes/halation.js';
 import { GlowNode } from './nodes/glow.js';
+import { GrainNode } from './nodes/grain.js';
 
 const $ = id => document.getElementById(id);
 const fileInput = $('file');
@@ -18,18 +19,23 @@ if(!gl){ alert('WebGL2 required. Use a modern browser.'); throw new Error('WebGL
 const NodeRegistry = {
   halation: HalationNode,
   glow: GlowNode,
+  grain: GrainNode
 };
 
-// Active nodes (pipeline order).
+// Active nodes (pipeline order). Grain added at the end by default.
 let nodes = [
-  { type: 'halation', settings: { ...HalationNode.defaults } },
-  { type: 'glow', settings: { ...GlowNode.defaults } },
+  { type: 'halation', settings: { ...HalationNode.defaults, enabled: false } },
+  { type: 'glow', settings: { ...GlowNode.defaults, enabled: false } },
+  { type: 'grain', settings: { ...GrainNode.defaults, enabled: false } }
 ];
 
 // Shared state
 let sourceTex = null;
 let imageRect = null;
 let texPool = {};
+let panOffset = {x: 0, y: 0};
+let zoomLevel = 1.0;
+let lastTouchDist = -1;
 
 // --------------- canvas sizing ---------------
 function fitCanvas(){
@@ -73,7 +79,12 @@ function linkProgram(vsSrc, fsSrc){
 // basic fullscreen quad
 const VS_QUAD = `#version 300 es
 in vec2 a_pos; in vec2 a_uv; out vec2 v_uv;
-void main(){ v_uv = a_uv; gl_Position = vec4(a_pos,0.0,1.0); }`;
+uniform vec2 u_pan;
+uniform float u_zoom;
+void main(){
+  vec2 pos = a_pos * u_zoom + u_pan;
+  v_uv = a_uv; gl_Position = vec4(pos,0.0,1.0);
+}`;
 
 const QUAD_BUF = new Float32Array([
   -1,-1, 0,0,
@@ -195,11 +206,88 @@ void main(){
   o = vec4(outc, 1.0);
 }`;
 
+const FS_GRAIN = `#version 300 es
+precision highp float;
+in vec2 v_uv; out vec4 o;
+
+uniform sampler2D uInput;
+uniform float uSize, uAmount, uShadows, uMidtones, uHighlights, uFilmResolution, uChroma, uSeed;
+uniform vec2 uCanvas;
+
+float hash(vec3 p) {
+  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453 + uSeed);
+}
+float noise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f*f*(3.0 - 2.0*f);
+  float n000 = hash(i + vec3(0.0,0.0,0.0));
+  float n100 = hash(i + vec3(1.0,0.0,0.0));
+  float n010 = hash(i + vec3(0.0,1.0,0.0));
+  float n110 = hash(i + vec3(1.0,1.0,0.0));
+  float n001 = hash(i + vec3(0.0,0.0,1.0));
+  float n101 = hash(i + vec3(1.0,0.0,1.0));
+  float n011 = hash(i + vec3(0.0,1.0,1.0));
+  float n111 = hash(i + vec3(1.0,1.0,1.0));
+  return mix(
+    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+    f.z
+  );
+}
+
+float lum(vec3 c) {
+  return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main() {
+  vec4 src = texture(uInput, v_uv);
+  if (src.a < 0.001) { o = src; return; }
+
+  float L = lum(src.rgb);
+  float shadowMask = smoothstep(0.0, 0.45, 0.45 - L) * uShadows;
+  float midMask = clamp(1.0 - abs(L - 0.5) * 2.0, 0.0, 1.0) * uMidtones;
+  float highlightMask = smoothstep(0.55, 1.0, L) * uHighlights;
+  float tonal = clamp(shadowMask + midMask + highlightMask, 0.0, 1.0);
+  if (tonal < 0.0001) { o = src; return; }
+
+  float shortDim = min(uCanvas.x, uCanvas.y);
+
+  // Prevent extreme frequencies that cause aliasing
+  float freq = min(40.0 / uSize, shortDim * 0.5);
+
+  // Add a random phase offset to break grid alignment
+  vec2 randOffset = vec2(
+      fract(sin(uSeed * 12.9898) * 43758.5453),
+      fract(cos(uSeed * 78.233) * 43758.5453)
+  );
+
+  vec2 scaled = (v_uv + randOffset) * (uCanvas / shortDim) * freq;
+
+
+  float grainL = noise(vec3(scaled, uSeed * 0.01));
+  grainL = mix(0.5, grainL, uFilmResolution);
+
+  vec3 grainRGB = vec3(grainL);
+  if (uChroma > 0.0) {
+    float gr = noise(vec3(scaled + 0.37, uSeed * 0.02));
+    float gg = noise(vec3(scaled + 1.13, uSeed * 0.03));
+    float gb = noise(vec3(scaled + 2.71, uSeed * 0.04));
+    grainRGB = mix(vec3(grainL), vec3(gr, gg, gb), uChroma);
+  }
+
+  vec3 applied = src.rgb + (grainRGB - 0.5) * uAmount * tonal;
+  o = vec4(clamp(applied, 0.0, 1.0), src.a);
+}`;
+
 // compile programs once where needed
 const progMask = linkProgram(VS_QUAD, FS_MASK);
 const progBlur = linkProgram(VS_QUAD, FS_BLUR);
 const progTint = linkProgram(VS_QUAD, FS_TINT);
 const progComposite = linkProgram(VS_QUAD, FS_COMPOSITE);
+const progGrain = linkProgram(VS_QUAD, FS_GRAIN);
+NodeRegistry.grain._prog = progGrain;
+
 
 // --------------- FBO / texture pool ---------------
 function createTex(w, h){
@@ -345,6 +433,8 @@ function runPipelineAndDraw(){
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.useProgram(progComposite);
   bindAttributes(progComposite);
+  gl.uniform2f(gl.getUniformLocation(progComposite, 'u_pan'), panOffset.x, panOffset.y);
+  gl.uniform1f(gl.getUniformLocation(progComposite, 'u_zoom'), zoomLevel);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, currentTex);
   gl.uniform1i(gl.getUniformLocation(progComposite,'u_base'), 0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texPool.tmp.tex);
@@ -485,7 +575,7 @@ fileInput.addEventListener('change', (e) => {
   i.onload = () => { uploadImageToGL(i); URL.revokeObjectURL(i.src); };
   i.src = URL.createObjectURL(f);
 });
-fitBtn.addEventListener('click', ()=>{ render(); });
+fitBtn.addEventListener('click', ()=>{ panOffset = {x:0, y:0}; zoomLevel = 1.0; render(); });
 
 // download
 downloadBtn.addEventListener('click', ()=>{
@@ -498,6 +588,61 @@ downloadBtn.addEventListener('click', ()=>{
   } else {
     const url = canvas.toDataURL(); const a=document.createElement('a'); a.href=url; a.download='halation-node.png'; a.click();
   }
+});
+
+// --------------- touch controls ---------------
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if(e.touches.length === 2){
+    lastTouchDist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+  }
+});
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if(e.touches.length === 1){
+    const touch = e.touches[0];
+    const dx = (touch.pageX - lastTouchPos.x) / canvas.width;
+    const dy = (touch.pageY - lastTouchPos.y) / canvas.height;
+    panOffset.x += dx * 2.0 / zoomLevel;
+    panOffset.y -= dy * 2.0 / zoomLevel;
+    lastTouchPos = {x: touch.pageX, y: touch.pageY};
+    render();
+  } else if (e.touches.length === 2){
+    const dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+    const pinch = dist - lastTouchDist;
+    zoomLevel = Math.max(0.1, zoomLevel + pinch * 0.01);
+    lastTouchDist = dist;
+    render();
+  }
+});
+canvas.addEventListener('touchend', (e) => {
+  lastTouchDist = -1;
+  lastTouchPos = null;
+});
+
+let lastTouchPos = null;
+canvas.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  lastTouchPos = {x: e.pageX, y: e.pageY};
+});
+canvas.addEventListener('mousemove', (e) => {
+  if(lastTouchPos){
+    const dx = (e.pageX - lastTouchPos.x) / canvas.width;
+    const dy = (e.pageY - lastTouchPos.y) / canvas.height;
+    panOffset.x += dx * 2.0 / zoomLevel;
+    panOffset.y -= dy * 2.0 / zoomLevel;
+    lastTouchPos = {x: e.pageX, y: e.pageY};
+    render();
+  }
+});
+canvas.addEventListener('mouseup', (e) => {
+  lastTouchPos = null;
+});
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoom = e.deltaY * -0.01;
+  zoomLevel = Math.max(0.1, zoomLevel + zoom);
+  render();
 });
 
 // --------------- render wrapper ---------------
