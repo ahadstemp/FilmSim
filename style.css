@@ -1,0 +1,37 @@
+:root{
+  --bg:#0f1113; --panel:#16181a; --accent:#00BFA6; --muted:#9aa0a6;
+  --gap:12px; --radius:10px; --card:#111318;
+}
+html,body{height:100%;margin:0;background:var(--bg);color:#e6eef1;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+.app{display:flex;flex-direction:column;height:100vh;gap:var(--gap);padding:12px;}
+header{display:flex;align-items:center;gap:12px;}
+h1{font-size:16px;margin:0;font-weight:600;}
+.main{display:flex;flex:1;gap:12px;align-items:stretch;flex-direction:column;}
+/* canvas area */
+.canvas-wrap{flex:1;display:flex;flex-direction:column;background:linear-gradient(180deg,#0b0c0d,#0f1113);border-radius:12px;padding:8px;min-height:220px;order:1;}
+#glcanvas{width:100%;height:100%;border-radius:8px;background:#000;touch-action:none;display:block;}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:8px;}
+.control-panel{background:var(--panel);border-radius:12px;padding:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6);overflow:auto;order:2;width:100%;max-width:none;}
+.node-card{background:var(--card);border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid rgba(255,255,255,0.03)}
+.node-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.node-title{font-weight:600}
+.node-controls{margin-top:8px}
+.control-row{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+label{font-size:13px;color:var(--muted)}
+input[type="range"]{width:100%}
+.big-btn{background:var(--accent);color:#012;border:none;padding:10px 12px;border-radius:10px;font-weight:600}
+.small-btn{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:8px;border-radius:8px}
+.muted{color:var(--muted);font-size:13px}
+.row{display:flex;gap:8px;align-items:center}
+.tiny{font-size:12px;color:var(--muted)}
+select,input[type="color"]{width:100%;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit}
+.toggle{display:inline-flex;align-items:center;gap:8px}
+.icon-btn{background:transparent;border:0;color:var(--muted);padding:6px;border-radius:6px}
+footer{display:flex;gap:12px;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+/* mobile-first */
+@media(min-width:900px){
+  .app{padding:18px}
+  .main{flex-direction:row;}
+  .canvas-wrap{order:0;}
+  .control-panel{max-width:420px;width:360px;}
+}

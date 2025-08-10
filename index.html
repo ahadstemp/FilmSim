@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Halation Studio — Modular Node Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Halation Studio — Node Editor</h1>
+      <div class="muted">Halation + Glow — node-based. Modular system.</div>
+    </header>
+
+    <div class="main">
+      <div class="canvas-wrap">
+        <canvas id="glcanvas"></canvas>
+        <div class="toolbar">
+          <input id="file" type="file" accept="image/*" />
+          <button id="fitBtn" class="small-btn">Fit</button>
+          <button id="download" class="big-btn">Download (crop)</button>
+        </div>
+      </div>
+
+      <aside class="control-panel" id="controls">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <div style="flex:1">
+            <div class="muted">Node Order (top = first applied)</div>
+          </div>
+        </div>
+
+        <div id="nodesContainer"></div>
+
+        <div style="margin-top:8px" class="muted tiny">
+          Tip: drag is not implemented; use ↑/↓ to reorder. The node rendered last takes priority.
+        </div>
+      </aside>
+    </div>
+
+    <footer>
+      <div class="muted">Built for quick halation + glow experimentation.</div>
+      <div class="muted">Open-source demo</div>
+    </footer>
+  </div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
