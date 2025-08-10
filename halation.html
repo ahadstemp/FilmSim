@@ -10,35 +10,58 @@
     --gap:12px; --radius:10px; --card:#111318;
   }
   html,body{height:100%;margin:0;background:var(--bg);color:#e6eef1;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
-  .app{display:flex;flex-direction:column;height:100vh;gap:var(--gap);padding:12px;}
-  header{display:flex;align-items:center;gap:12px;}
-  h1{font-size:16px;margin:0;font-weight:600;}
-  .main{display:flex;flex:1;gap:12px;align-items:stretch;}
+  .app{display:flex;flex-direction:column;height:100vh;gap:var(--gap);padding:8px;}
+  header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  h1{font-size:14px;margin:0;font-weight:600;}
+  .main{display:flex;flex:1;gap:8px;align-items:stretch;min-height:0;}
   /* canvas area */
-  .canvas-wrap{flex:1;display:flex;flex-direction:column;background:linear-gradient(180deg,#0b0c0d,#0f1113);border-radius:12px;padding:8px;min-height:220px}
-  #glcanvas{width:100%;height:100%;border-radius:8px;background:#000;touch-action:none;display:block;}
-  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:8px;}
-  .control-panel{width:360px;max-width:42vw;background:var(--panel);border-radius:12px;padding:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6);overflow:auto}
-  .node-card{background:var(--card);border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid rgba(255,255,255,0.03)}
-  .node-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
-  .node-title{font-weight:600}
-  .node-controls{margin-top:8px}
-  .control-row{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
-  label{font-size:13px;color:var(--muted)}
-  input[type="range"]{width:100%}
-  .big-btn{background:var(--accent);color:#012;border:none;padding:10px 12px;border-radius:10px;font-weight:600}
-  .small-btn{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:8px;border-radius:8px}
-  .muted{color:var(--muted);font-size:13px}
-  .row{display:flex;gap:8px;align-items:center}
-  .tiny{font-size:12px;color:var(--muted)}
-  select,input[type="color"]{width:100%;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit}
-  .toggle{display:inline-flex;align-items:center;gap:8px}
-  .icon-btn{background:transparent;border:0;color:var(--muted);padding:6px;border-radius:6px}
-  footer{display:flex;gap:12px;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+  .canvas-wrap{flex:1;display:flex;flex-direction:column;background:linear-gradient(180deg,#0b0c0d,#0f1113);border-radius:12px;padding:6px;min-height:200px;position:relative;overflow:hidden;}
+  #glcanvas{width:100%;height:100%;border-radius:8px;background:#000;touch-action:none;display:block;cursor:grab;}
+  #glcanvas:active{cursor:grabbing;}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px;background:var(--panel);border-radius:8px;justify-content:center;}
+  .control-panel{width:280px;max-width:35vw;background:var(--panel);border-radius:12px;padding:8px;box-shadow:0 6px 20px rgba(0,0,0,0.6);overflow:auto;display:flex;flex-direction:column;}
+  .node-card{background:var(--card);border-radius:8px;padding:8px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.03)}
+  .node-header{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .node-title{font-weight:600;font-size:13px}
+  .node-controls{margin-top:6px}
+  .control-row{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
+  label{font-size:12px;color:var(--muted)}
+  input[type="range"]{width:100%;height:24px}
+  .big-btn{background:var(--accent);color:#012;border:none;padding:8px 10px;border-radius:8px;font-weight:600;font-size:13px}
+  .small-btn{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:6px;border-radius:6px;font-size:12px}
+  .muted{color:var(--muted);font-size:12px}
+  .row{display:flex;gap:6px;align-items:center}
+  .tiny{font-size:11px;color:var(--muted)}
+  select,input[type="color"]{width:100%;padding:4px;border-radius:6px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit;font-size:12px}
+  .toggle{display:inline-flex;align-items:center;gap:6px}
+  .icon-btn{background:transparent;border:0;color:var(--muted);padding:4px;border-radius:4px;font-size:12px}
+  footer{display:flex;gap:8px;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted)}
+  
+  /* Touch controls overlay */
+  .touch-controls{position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:10;}
+  .touch-btn{background:rgba(0,0,0,0.7);color:white;border:none;padding:6px;border-radius:6px;font-size:12px;min-width:32px;height:32px;display:flex;align-items:center;justify-content:center;}
+  
+  /* File input styling */
+  .file-input-wrapper{position:relative;display:inline-block;}
+  .file-input-wrapper input[type="file"]{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;}
+  .file-input-btn{background:var(--accent);color:#012;border:none;padding:8px 12px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;display:inline-block;text-align:center;min-width:80px;}
+  .file-input-btn:hover{background:#00d4b8;}
+  
   /* mobile-first */
+  @media(max-width:768px){
+    .app{padding:6px;gap:6px;}
+    .main{flex-direction:column;gap:6px;}
+    .canvas-wrap{min-height:250px;}
+    .control-panel{width:100%;max-width:none;max-height:40vh;}
+    .toolbar{justify-content:center;}
+    header{justify-content:center;text-align:center;}
+    h1{font-size:13px;}
+    .muted{font-size:11px;}
+  }
+  
   @media(min-width:900px){
-    .app{padding:18px}
-    .control-panel{max-width:420px}
+    .app{padding:12px}
+    .control-panel{width:320px;max-width:30vw}
   }
 </style>
 </head>
@@ -52,11 +75,20 @@
   <div class="main">
     <div class="canvas-wrap">
       <canvas id="glcanvas"></canvas>
-      <div class="toolbar">
-        <input id="file" type="file" accept="image/*" />
-        <button id="fitBtn" class="small-btn">Fit</button>
-        <button id="download" class="big-btn">Download (crop)</button>
+      <div class="touch-controls">
+        <button id="zoomInBtn" class="touch-btn" title="Zoom In">+</button>
+        <button id="zoomOutBtn" class="touch-btn" title="Zoom Out">−</button>
+        <button id="resetViewBtn" class="touch-btn" title="Reset View">⌂</button>
       </div>
+    </div>
+    
+    <div class="toolbar">
+      <div class="file-input-wrapper">
+        <input id="file" type="file" accept="image/*" />
+        <label for="file" class="file-input-btn">📁 Upload Image</label>
+      </div>
+      <button id="fitBtn" class="small-btn">Fit</button>
+      <button id="download" class="big-btn">Download (crop)</button>
     </div>
 
     <aside class="control-panel" id="controls">
@@ -106,16 +138,34 @@ let sourceTex = null;
 let imageRect = null; // crop region in canvas pixels
 let workingW = 1024, workingH = 768;
 
+// Canvas transformation state for touch controls
+let canvasTransform = {
+  scale: 1.0,
+  translateX: 0.0,
+  translateY: 0.0,
+  minScale: 0.1,
+  maxScale: 5.0
+};
+
+// Touch state
+let touchState = {
+  isDragging: false,
+  lastTouchX: 0,
+  lastTouchY: 0,
+  startDistance: 0,
+  startScale: 1.0
+};
+
 // We'll keep a simple shared FBO pool sized to canvas pixels
 let texPool = {}; // will hold dynamically created textures/fbos per pass
 
 // Node structure: each node has id, type, enabled, before (bypass), collapsed, settings
 let nodes = [
-  { id: 'halation', type: 'Halation', enabled: true, before: false, collapsed: false, settings: {
+  { id: 'halation', type: 'Halation', enabled: false, before: false, collapsed: true, settings: {
       amount: 0.6, radius: 40, threshold: 0.85, color: '#ff8b6b', iterations: 2
     }
   },
-  { id: 'glow', type: 'Glow', enabled: true, before: false, collapsed: true, settings: {
+  { id: 'glow', type: 'Glow', enabled: false, before: false, collapsed: true, settings: {
       amount: 0.0, radius: 40, threshold: 0.9, color: '#ffd4b2', iterations: 2,
       blend: 'Screen', resolveMode: false
     }
@@ -161,10 +211,23 @@ function linkProgram(vsSrc, fsSrc){
   return p;
 }
 
-// basic fullscreen quad
+// basic fullscreen quad with transformation support
 const VS_QUAD = `#version 300 es
 in vec2 a_pos; in vec2 a_uv; out vec2 v_uv;
-void main(){ v_uv = a_uv; gl_Position = vec4(a_pos,0.0,1.0); }`;
+uniform mat3 u_transform;
+void main(){ 
+  vec2 transformed = (u_transform * vec3(a_pos, 1.0)).xy;
+  v_uv = a_uv; 
+  gl_Position = vec4(transformed, 0.0, 1.0); 
+}`;
+
+// basic fullscreen quad without transformation (for intermediate passes)
+const VS_QUAD_SIMPLE = `#version 300 es
+in vec2 a_pos; in vec2 a_uv; out vec2 v_uv;
+void main(){ 
+  v_uv = a_uv; 
+  gl_Position = vec4(a_pos, 0.0, 1.0); 
+}`;
 
 const QUAD_BUF = new Float32Array([
   -1,-1, 0,0,
@@ -305,10 +368,11 @@ void main(){
 }`;
 
 // compile commonly used programs
-const progMask = linkProgram(VS_QUAD, FS_MASK);
-const progBlur = linkProgram(VS_QUAD, FS_BLUR);
-const progTint = linkProgram(VS_QUAD, FS_TINT);
-const progComposite = linkProgram(VS_QUAD, FS_COMPOSITE);
+const progMask = linkProgram(VS_QUAD_SIMPLE, FS_MASK);
+const progBlur = linkProgram(VS_QUAD_SIMPLE, FS_BLUR);
+const progTint = linkProgram(VS_QUAD_SIMPLE, FS_TINT);
+const progComposite = linkProgram(VS_QUAD_SIMPLE, FS_COMPOSITE);
+const progCompositeScreen = linkProgram(VS_QUAD, FS_COMPOSITE); // for final screen output with transform
 
 // ------- FBO / texture pool -------
 function createTex(w, h){
@@ -366,11 +430,32 @@ function bindAttribs(prog){
 }
 
 // ------- Render utilities: mask -> blur -> tint pipeline -------
+function getTransformMatrix() {
+  // Create transformation matrix for canvas view
+  const scale = canvasTransform.scale;
+  const tx = canvasTransform.translateX / canvas.width;
+  const ty = -canvasTransform.translateY / canvas.height; // Flip Y axis
+  
+  return new Float32Array([
+    scale, 0, 0,
+    0, scale, 0,
+    tx, ty, 1
+  ]);
+}
+
+function setTransformUniform(program) {
+  const transformLoc = gl.getUniformLocation(program, 'u_transform');
+  if (transformLoc) {
+    gl.uniformMatrix3fv(transformLoc, false, getTransformMatrix());
+  }
+}
+
 function maskPass(inputTex, threshold, outFBO){
   gl.bindFramebuffer(gl.FRAMEBUFFER, outFBO);
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.useProgram(progMask);
   bindAttribs(progMask);
+  // Don't apply transform to intermediate passes
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
   gl.uniform1i(gl.getUniformLocation(progMask, 'u_tex'), 0);
   gl.uniform1f(gl.getUniformLocation(progMask, 'u_threshold'), threshold);
@@ -385,6 +470,7 @@ function blurSeparable(inputTex, radius, iterations){
     gl.viewport(0,0,canvas.width,canvas.height);
     gl.useProgram(progBlur);
     bindAttribs(progBlur);
+    // Don't apply transform to intermediate passes
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, (i===0)? texPool.mask.tex : texPool.blur.tex);
     gl.uniform1i(gl.getUniformLocation(progBlur,'u_tex'), 0);
     gl.uniform2f(gl.getUniformLocation(progBlur,'u_texel'), 1.0/canvas.width, 1.0/canvas.height);
@@ -407,6 +493,7 @@ function tintPass(maskTex, tintColor, outFBO){
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.useProgram(progTint);
   bindAttribs(progTint);
+  // Don't apply transform to intermediate passes
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, maskTex);
   gl.uniform1i(gl.getUniformLocation(progTint,'u_mask'), 0);
   gl.uniform3f(gl.getUniformLocation(progTint,'u_tint'), tintColor[0], tintColor[1], tintColor[2]);
@@ -419,6 +506,7 @@ function compositePass(baseTex, effectTex, amount, mode, outFBO){
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.useProgram(progComposite);
   bindAttribs(progComposite);
+  // Don't apply transform to intermediate passes
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, baseTex);
   gl.uniform1i(gl.getUniformLocation(progComposite,'u_base'), 0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, effectTex);
@@ -488,8 +576,13 @@ function runPipelineAndDraw(){
     gl.clear(gl.COLOR_BUFFER_BIT);
     return;
   }
+  
+  // Check if any nodes are enabled
+  const hasEnabledNodes = nodes.some(node => node.enabled && !node.before);
+  
   // Start with sourceTex as current
   let currentTex = sourceTex;
+  
   // We'll iterate nodes in order, applying enabled nodes. Each node writes to its assigned nodeOut (A or B)
   for(let i=0;i<nodes.length;i++){
     const node = nodes[i];
@@ -515,19 +608,25 @@ function runPipelineAndDraw(){
       currentTex = (i%2===0)? texPool.nodeOutA.tex : texPool.nodeOutB.tex;
     }
   }
+  
   // final blit to screen (currentTex is final)
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0,0,canvas.width,canvas.height);
-  // simple copy shader: use composite prog with u_amount=0 to just show base (compositePass could be used but we'll draw directly)
-  gl.useProgram(progComposite);
-  bindAttribs(progComposite);
+  
+  // Clear the screen before drawing
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  
+  // Always use transformed version for final output to enable zoom/pan controls
+  gl.useProgram(progCompositeScreen);
+  bindAttribs(progCompositeScreen);
+  setTransformUniform(progCompositeScreen);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, currentTex);
-  gl.uniform1i(gl.getUniformLocation(progComposite,'u_base'), 0);
-  // effect = black, amount=0 -> composite will output base
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texPool.tmp.tex); // tmp is unused here
-  gl.uniform1i(gl.getUniformLocation(progComposite,'u_effect'), 1);
-  gl.uniform1f(gl.getUniformLocation(progComposite,'u_amount'), 0.0);
-  gl.uniform1i(gl.getUniformLocation(progComposite,'u_mode'), 0);
+  gl.uniform1i(gl.getUniformLocation(progCompositeScreen,'u_base'), 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texPool.tmp.tex);
+  gl.uniform1i(gl.getUniformLocation(progCompositeScreen,'u_effect'), 1);
+  gl.uniform1f(gl.getUniformLocation(progCompositeScreen,'u_amount'), 0.0);
+  gl.uniform1i(gl.getUniformLocation(progCompositeScreen,'u_mode'), 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
@@ -702,17 +801,201 @@ fitBtn.addEventListener('click', ()=>{ render(); });
 downloadBtn.addEventListener('click', ()=>{
   render();
   if(imageRect && imageRect.dw>0 && imageRect.dh>0){
-    const tmp = document.createElement('canvas'); tmp.width = imageRect.dw; tmp.height = imageRect.dh;
+    // Create a canvas that fits the image in its original aspect ratio within canvas bounds
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+    const imageAspectRatio = imageRect.dw / imageRect.dh;
+    const canvasAspectRatio = canvasWidth / canvasHeight;
+    
+    let downloadWidth, downloadHeight;
+    
+    if (imageAspectRatio > canvasAspectRatio) {
+      // Image is wider than canvas - fit to width
+      downloadWidth = canvasWidth;
+      downloadHeight = canvasWidth / imageAspectRatio;
+    } else {
+      // Image is taller than canvas - fit to height
+      downloadHeight = canvasHeight;
+      downloadWidth = canvasHeight * imageAspectRatio;
+    }
+    
+    const tmp = document.createElement('canvas'); 
+    tmp.width = downloadWidth; 
+    tmp.height = downloadHeight;
     const tctx = tmp.getContext('2d');
-    // draw from WebGL canvas (which is in device pixels)
-    tctx.drawImage(canvas, imageRect.dx, imageRect.dy, imageRect.dw, imageRect.dh, 0, 0, tmp.width, tmp.height);
+    
+    // Calculate the source rectangle to capture the full image area
+    // We need to account for the current transform to get the actual image bounds
+    const scale = canvasTransform.scale;
+    const translateX = canvasTransform.translateX;
+    const translateY = canvasTransform.translateY;
+    
+    // Calculate the visible image area in canvas coordinates
+    const visibleImageX = (imageRect.dx - translateX) / scale;
+    const visibleImageY = (imageRect.dy - translateY) / scale;
+    const visibleImageWidth = imageRect.dw / scale;
+    const visibleImageHeight = imageRect.dh / scale;
+    
+    // Draw the full canvas content, which will include the transformed image
+    tctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, downloadWidth, downloadHeight);
+    
     tmp.toBlob(blob=>{
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='halation-node.png'; a.click(); URL.revokeObjectURL(url);
+      const url = URL.createObjectURL(blob); 
+      const a = document.createElement('a'); 
+      a.href=url; 
+      a.download='halation-node.png'; 
+      a.click(); 
+      URL.revokeObjectURL(url);
     }, 'image/png');
   } else {
-    const url = canvas.toDataURL(); const a=document.createElement('a'); a.href=url; a.download='halation-node.png'; a.click();
+    const url = canvas.toDataURL(); 
+    const a=document.createElement('a'); 
+    a.href=url; 
+    a.download='halation-node.png'; 
+    a.click();
   }
 });
+
+// ------- Touch Controls -------
+function resetView() {
+  canvasTransform.scale = 1.0;
+  canvasTransform.translateX = 0.0;
+  canvasTransform.translateY = 0.0;
+  console.log('Reset view:', canvasTransform);
+  render();
+}
+
+function zoomIn() {
+  canvasTransform.scale = Math.min(canvasTransform.scale * 1.2, canvasTransform.maxScale);
+  console.log('Zoom in:', canvasTransform.scale);
+  render();
+}
+
+function zoomOut() {
+  canvasTransform.scale = Math.max(canvasTransform.scale / 1.2, canvasTransform.minScale);
+  console.log('Zoom out:', canvasTransform.scale);
+  render();
+}
+
+function getTouchDistance(touches) {
+  if (touches.length < 2) return 0;
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getTouchCenter(touches) {
+  if (touches.length === 0) return { x: 0, y: 0 };
+  let x = 0, y = 0;
+  for (let i = 0; i < touches.length; i++) {
+    x += touches[i].clientX;
+    y += touches[i].clientY;
+  }
+  return { x: x / touches.length, y: y / touches.length };
+}
+
+// Touch event handlers
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touches = Array.from(e.touches);
+  console.log('Touch start:', touches.length, 'touches');
+  
+  if (touches.length === 1) {
+    // Single touch - start dragging
+    touchState.isDragging = true;
+    touchState.lastTouchX = touches[0].clientX;
+    touchState.lastTouchY = touches[0].clientY;
+  } else if (touches.length === 2) {
+    // Two touches - start pinch to zoom
+    touchState.startDistance = getTouchDistance(touches);
+    touchState.startScale = canvasTransform.scale;
+  }
+});
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touches = Array.from(e.touches);
+  
+  if (touches.length === 1 && touchState.isDragging) {
+    // Single touch drag
+    const deltaX = touches[0].clientX - touchState.lastTouchX;
+    const deltaY = touches[0].clientY - touchState.lastTouchY;
+    
+    canvasTransform.translateX += deltaX;
+    canvasTransform.translateY += deltaY;
+    
+    touchState.lastTouchX = touches[0].clientX;
+    touchState.lastTouchY = touches[0].clientY;
+    
+    render();
+  } else if (touches.length === 2) {
+    // Two touch pinch to zoom
+    const currentDistance = getTouchDistance(touches);
+    if (touchState.startDistance > 0) {
+      const scaleFactor = currentDistance / touchState.startDistance;
+      const newScale = touchState.startScale * scaleFactor;
+      canvasTransform.scale = Math.max(canvasTransform.minScale, 
+                                     Math.min(canvasTransform.maxScale, newScale));
+      render();
+    }
+  }
+});
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  touchState.isDragging = false;
+  touchState.startDistance = 0;
+});
+
+// Mouse controls for desktop
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 0) { // Left mouse button
+    touchState.isDragging = true;
+    touchState.lastTouchX = e.clientX;
+    touchState.lastTouchY = e.clientY;
+    canvas.style.cursor = 'grabbing';
+    console.log('Mouse down - start dragging');
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (touchState.isDragging) {
+    const deltaX = e.clientX - touchState.lastTouchX;
+    const deltaY = e.clientY - touchState.lastTouchY;
+    
+    canvasTransform.translateX += deltaX;
+    canvasTransform.translateY += deltaY;
+    
+    touchState.lastTouchX = e.clientX;
+    touchState.lastTouchY = e.clientY;
+    
+    render();
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  touchState.isDragging = false;
+  canvas.style.cursor = 'grab';
+});
+
+canvas.addEventListener('mouseleave', (e) => {
+  touchState.isDragging = false;
+  canvas.style.cursor = 'grab';
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+  canvasTransform.scale = Math.max(canvasTransform.minScale, 
+                                 Math.min(canvasTransform.maxScale, 
+                                        canvasTransform.scale * zoomFactor));
+  render();
+});
+
+// Touch control button handlers
+$('zoomInBtn').addEventListener('click', zoomIn);
+$('zoomOutBtn').addEventListener('click', zoomOut);
+$('resetViewBtn').addEventListener('click', resetView);
 
 // initial blank render
 render();
