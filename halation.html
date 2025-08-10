@@ -82,13 +82,13 @@
       </div>
     </div>
     
-    <div class="toolbar">
+      <div class="toolbar">
       <div class="file-input-wrapper">
         <input id="file" type="file" accept="image/*" />
         <label for="file" class="file-input-btn">📁 Upload Image</label>
       </div>
-      <button id="fitBtn" class="small-btn">Fit</button>
-      <button id="download" class="big-btn">Download (crop)</button>
+        <button id="fitBtn" class="small-btn">Fit</button>
+        <button id="download" class="big-btn">Download (crop)</button>
     </div>
 
     <aside class="control-panel" id="controls">
@@ -137,6 +137,10 @@ if(!gl){ alert('WebGL2 required. Use a modern browser.'); throw new Error('WebGL
 let sourceTex = null;
 let imageRect = null; // crop region in canvas pixels
 let workingW = 1024, workingH = 768;
+// Keep a reference to the original uploaded image and its native resolution
+let originalImage = null;
+let originalImageWidth = 0;
+let originalImageHeight = 0;
 
 // Canvas transformation state for touch controls
 let canvasTransform = {
@@ -271,22 +275,28 @@ void main(){
   o = vec4(mask,mask,mask,1.0);
 }`;
 
-// Separable blur shader (9-tap Gaussian)
+// Separable blur shader (9-tap Gaussian) with pixel-true radius
 const FS_BLUR = `#version 300 es
 precision highp float;
 in vec2 v_uv; out vec4 o;
 uniform sampler2D u_tex; uniform vec2 u_texel; uniform float u_radius; uniform int u_horizontal;
 float gaussian(float x, float sigma){ return exp(- (x*x) / (2.0 * sigma * sigma)); }
 void main(){
-  float sigma = max(1.0, u_radius / 3.0);
+  // u_radius is in pixels. Map the 9 taps across [-radius, radius] range
+  float radiusPx = max(0.0, u_radius);
+  float sigma = max(0.0001, radiusPx / 3.0);
   vec3 sum = vec3(0.0); float wsum = 0.0;
   for(int i=-4;i<=4;i++){
     float t = float(i);
-    float w = gaussian(t, sigma);
-    vec2 off = u_horizontal==1 ? vec2(t * u_texel.x, 0.0) : vec2(0.0, t * u_texel.y);
-    sum += texture(u_tex, v_uv + off).rgb * w; wsum += w;
+    float px = t * (radiusPx / 4.0); // distribute taps across the pixel radius
+    float w = gaussian(px, sigma);
+    vec2 off = (u_horizontal==1)
+      ? vec2(px * u_texel.x, 0.0)
+      : vec2(0.0, px * u_texel.y);
+    sum += texture(u_tex, v_uv + off).rgb * w; 
+    wsum += w;
   }
-  o = vec4(sum/wsum, 1.0);
+  o = vec4(sum / max(wsum, 1e-6), 1.0);
 }`;
 
 // Tint the mask into colored glow/halo
@@ -757,6 +767,10 @@ rebuildUI();
 function uploadImageToGL(img){
   // resample and preserve aspect to canvas internal pixel size
   fitCanvas();
+  // Remember original image and its native resolution for high-res export
+  originalImage = img;
+  originalImageWidth = img.naturalWidth || img.width;
+  originalImageHeight = img.naturalHeight || img.height;
   const w = canvas.width, h = canvas.height;
   const off = document.createElement('canvas'); off.width = w; off.height = h;
   const ctx = off.getContext('2d');
@@ -799,60 +813,83 @@ fitBtn.addEventListener('click', ()=>{ render(); });
 
 // Download crop to imageRect
 downloadBtn.addEventListener('click', ()=>{
-  render();
-  if(imageRect && imageRect.dw>0 && imageRect.dh>0){
-    // Create a canvas that fits the image in its original aspect ratio within canvas bounds
-    const canvasWidth = canvas.width;
-    const canvasHeight = canvas.height;
-    const imageAspectRatio = imageRect.dw / imageRect.dh;
-    const canvasAspectRatio = canvasWidth / canvasHeight;
-    
-    let downloadWidth, downloadHeight;
-    
-    if (imageAspectRatio > canvasAspectRatio) {
-      // Image is wider than canvas - fit to width
-      downloadWidth = canvasWidth;
-      downloadHeight = canvasWidth / imageAspectRatio;
-    } else {
-      // Image is taller than canvas - fit to height
-      downloadHeight = canvasHeight;
-      downloadWidth = canvasHeight * imageAspectRatio;
-    }
-    
-    const tmp = document.createElement('canvas'); 
-    tmp.width = downloadWidth; 
-    tmp.height = downloadHeight;
-    const tctx = tmp.getContext('2d');
-    
-    // Calculate the source rectangle to capture the full image area
-    // We need to account for the current transform to get the actual image bounds
-    const scale = canvasTransform.scale;
-    const translateX = canvasTransform.translateX;
-    const translateY = canvasTransform.translateY;
-    
-    // Calculate the visible image area in canvas coordinates
-    const visibleImageX = (imageRect.dx - translateX) / scale;
-    const visibleImageY = (imageRect.dy - translateY) / scale;
-    const visibleImageWidth = imageRect.dw / scale;
-    const visibleImageHeight = imageRect.dh / scale;
-    
-    // Draw the full canvas content, which will include the transformed image
-    tctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, downloadWidth, downloadHeight);
-    
-    tmp.toBlob(blob=>{
-      const url = URL.createObjectURL(blob); 
-      const a = document.createElement('a'); 
-      a.href=url; 
-      a.download='halation-node.png'; 
-      a.click(); 
+  // If we have the original image, render the full pipeline at its native resolution for export
+  if(originalImage && originalImageWidth>0 && originalImageHeight>0){
+    // Save current UI/GL state
+    const prevCssW = canvas.style.width;
+    const prevCssH = canvas.style.height;
+    const prevW = canvas.width;
+    const prevH = canvas.height;
+    const prevImageRect = imageRect ? { ...imageRect } : null;
+    const savedTransform = { ...canvasTransform };
+    const savedNodes = JSON.parse(JSON.stringify(nodes));
+
+    // Resize canvas to original resolution (no CSS change to avoid layout shift)
+    canvas.width = originalImageWidth;
+    canvas.height = originalImageHeight;
+    initPool();
+
+    // Rebuild source texture from original image at full resolution (no letterboxing)
+    const off = document.createElement('canvas');
+    off.width = originalImageWidth; off.height = originalImageHeight;
+    const offCtx = off.getContext('2d');
+    offCtx.drawImage(originalImage, 0, 0, originalImageWidth, originalImageHeight);
+
+    if(sourceTex) { try{ gl.deleteTexture(sourceTex); }catch(e){} }
+    sourceTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, sourceTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, off);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // Image now fills the canvas entirely
+    imageRect = { dx:0, dy:0, dw: originalImageWidth, dh: originalImageHeight, canvasW: originalImageWidth, canvasH: originalImageHeight };
+
+    // Reset view transform (no zoom/pan in export)
+    canvasTransform.scale = 1.0;
+    canvasTransform.translateX = 0.0;
+    canvasTransform.translateY = 0.0;
+
+    // Scale pixel-based radii to maintain perceived look relative to image size
+    const radiusScale = (prevImageRect && prevImageRect.dw>0) ? (originalImageWidth / prevImageRect.dw) : 1.0;
+    nodes.forEach(n=>{
+      if(n && n.settings && typeof n.settings.radius !== 'undefined'){
+        n.settings.radius = parseFloat(n.settings.radius) * radiusScale;
+      }
+    });
+
+    // Render at high resolution
+    render();
+
+    // Read the image directly from the canvas at full resolution
+    canvas.toBlob(blob=>{
+      // Restore previous state immediately after we have the blob
+      // Restore nodes
+      nodes = savedNodes;
+      // Restore canvas size and style, and re-upload fitted source for UI
+      canvas.width = prevW; canvas.height = prevH; canvas.style.width = prevCssW; canvas.style.height = prevCssH;
+      // Restore transform
+      canvasTransform.scale = savedTransform.scale;
+      canvasTransform.translateX = savedTransform.translateX;
+      canvasTransform.translateY = savedTransform.translateY;
+      // Recreate original working textures and imageRect by refitting the original image
+      uploadImageToGL(originalImage);
+      // Rebuild UI to reflect restored settings
+      rebuildUI();
+      render();
+
+      // Trigger download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download='halation-node.png'; a.click();
       URL.revokeObjectURL(url);
     }, 'image/png');
   } else {
-    const url = canvas.toDataURL(); 
-    const a=document.createElement('a'); 
-    a.href=url; 
-    a.download='halation-node.png'; 
-    a.click();
+    // Fallback: download current canvas
+    const url = canvas.toDataURL();
+    const a=document.createElement('a'); a.href=url; a.download='halation-node.png'; a.click();
   }
 });
 
